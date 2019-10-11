@@ -30,6 +30,7 @@ type cpuFreqCollector struct {
 	scalingFreq    *prometheus.Desc
 	scalingFreqMin *prometheus.Desc
 	scalingFreqMax *prometheus.Desc
+	topologies     []*sysfs.CPUTopology
 }
 
 func init() {
@@ -41,6 +42,19 @@ func NewCPUFreqCollector() (Collector, error) {
 	fs, err := sysfs.NewFS(*sysPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sysfs: %v", err)
+	}
+
+	cpus, err := fs.CPUs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read cpu info: %v", err)
+	}
+	cpuCount := len(cpus)
+	topologies := make([]*sysfs.CPUTopology, cpuCount)
+	for i := 0; i < cpuCount; i++ {
+		topology, err := cpus[i].Topology()
+		if err == nil {
+			topologies[i] = topology
+		}
 	}
 
 	return &cpuFreqCollector{
@@ -75,12 +89,13 @@ func NewCPUFreqCollector() (Collector, error) {
 			"Maximum scaled cpu thread frequency in hertz.",
 			[]string{"cpu"}, nil,
 		),
+		topologies: topologies,
 	}, nil
 }
 
 // Update implements Collector and exposes cpu related metrics from /proc/stat and /sys/.../cpu/.
 func (c *cpuFreqCollector) Update(ch chan<- prometheus.Metric) error {
-	cpuFreqs, err := c.fs.SystemCpufreq()
+	cpuFreqs, err := c.fs.SystemCpufreq(c.topologies)
 	if err != nil {
 		return err
 	}
